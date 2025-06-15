@@ -1,0 +1,8 @@
+{
+  "name": "AI Restaurant Booking Assistant",
+  "description": "A voice-controlled AI assistant to help find and book restaurants using Gemini Live API. It allows users to search for restaurants, check availability, and make reservations through voice commands.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "prompt": ""
+}
