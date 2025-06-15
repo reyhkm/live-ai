@@ -1,7 +1,9 @@
 
 
 
-import { GoogleGenAI, Modality, LiveServerMessage, FunctionCall, FunctionResponse, LiveConnectConfig } from '@google/genai';
+
+
+import { GoogleGenAI, Modality, LiveServerMessage, FunctionCall, FunctionResponse, LiveConnectConfig, LiveServerContent } from '@google/genai';
 import { GEMINI_LIVE_MODEL_NAME, SYSTEM_INSTRUCTION_BARISTA_BOT, BARISTA_FUNCTION_DECLARATIONS, AUDIO_INPUT_MIME_TYPE } from '../constants';
 import { SubmitOrderArgs, FunctionCallResponseData, GeminiLiveSession, GeminiServerMessage } from '../types';
 
@@ -115,10 +117,10 @@ export class LiveAiService {
           },
           onmessage: (message: LiveServerMessage) => { 
             // Handle SessionResumptionUpdate immediately
-            const serverContent = message.serverContent; 
-            const sessionState = serverContent?.sessionState; 
-            if (sessionState?.resumable && sessionState?.handle) {
-              this.currentSessionHandle = sessionState.handle;
+            const serverContent: LiveServerContent | undefined = message.serverContent; 
+            const sessionStateUpdate = serverContent?.sessionStateUpdate; 
+            if (sessionStateUpdate?.resumable && sessionStateUpdate?.handle) {
+              this.currentSessionHandle = sessionStateUpdate.handle;
               console.log('[LiveAiService] Updated session resumption handle:', this.currentSessionHandle);
             }
             this.responseQueue.push(message as GeminiServerMessage); 
