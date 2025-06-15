@@ -13,6 +13,7 @@ const App: React.FC = () => {
   const [aiStatus, setAiStatus] = useState<AiStatus>(AiStatus.Idle);
   const [currentTranscript, setCurrentTranscript] = useState<string>('');
   const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [pendingRecordingStart, setPendingRecordingStart] = useState<boolean>(false);
 
   const liveAiServiceRef = useRef<LiveAiService | null>(null);
   const currentAiMessageIdRef = useRef<string | null>(null);
@@ -35,11 +36,12 @@ const App: React.FC = () => {
 
   const stopRecordingAndSession = useCallback(() => { 
     if (liveAiServiceRef.current?.isConnected()) {
-        liveAiServiceRef.current?.closeSession(); // This will now also clear the session handle in the service
+        liveAiServiceRef.current?.closeSession(); 
     }
     stopAiPlayback(); 
     setAiStatus(AiStatus.Idle);
     currentAiMessageIdRef.current = null;
+    setPendingRecordingStart(false); // Ensure pending start is cleared
   }, [stopAiPlayback]);
 
 
@@ -47,7 +49,7 @@ const App: React.FC = () => {
     return {
       onOpen: () => {
         console.log("Live AI session opened for Barista Bot.");
-        setAiStatus(AiStatus.Listening);
+        setAiStatus(AiStatus.Listening); // This will trigger the useEffect to start recording if pending
         addMessage(Sender.System, "Percakapan dimulai. Arum sedang mendengarkan.");
       },
       onMessage: (message: GeminiServerMessage) => {
@@ -56,7 +58,8 @@ const App: React.FC = () => {
       onError: (error: Error) => {
         console.error("Live AI Error (Barista Bot):", error);
         setAiStatus(AiStatus.Error);
-        // Check if message indicates an invalid or expired session handle attempt
+        setPendingRecordingStart(false); // Clear pending start on error
+
         const errorMsg = error.message?.toLowerCase();
         if (errorMsg?.includes('session') && (errorMsg?.includes('invalid') || errorMsg?.includes('expired') || errorMsg?.includes('not found'))) {
              addMessage(Sender.System, `Error: Sesi sebelumnya tidak valid atau sudah berakhir. Memulai sesi baru.`);
@@ -67,18 +70,18 @@ const App: React.FC = () => {
         if (isRecordingRef.current) { 
           stopRecordingRef.current(); 
         }
-        stopRecordingAndSession(); // This will call closeSession() in the service, clearing the handle
+        stopRecordingAndSession(); 
       },
       onClose: (event: CloseEvent) => {
         console.log("Live AI session closed (Barista Bot):", event.reason || "Tidak ada alasan diberikan", "Code:", event.code);
         if (aiStatus !== AiStatus.Error) { 
             setAiStatus(AiStatus.Idle);
         }
-         // Avoid "Percakapan berakhir." if it was an abnormal closure that might be resumed,
-         // or if an error already displayed a message.
-        if (event.code === 1000 || event.code === 1005 ) { // Normal closure or no status
+        setPendingRecordingStart(false); // Clear pending start on close
+        
+        if (event.code === 1000 || event.code === 1005 ) { 
              addMessage(Sender.System, "Percakapan berakhir.");
-        } else if (event.code !== 1006 && event.code !== 1001 && event.code !== 1002 && aiStatus !== AiStatus.Error){ // 1006 abnormal, 1001 going away
+        } else if (event.code !== 1006 && event.code !== 1001 && event.code !== 1002 && aiStatus !== AiStatus.Error){ 
             addMessage(Sender.System, `Koneksi terputus (Code: ${event.code}). Anda mungkin bisa mencoba lagi untuk melanjutkan.`);
         }
         currentAiMessageIdRef.current = null;
@@ -171,6 +174,7 @@ const App: React.FC = () => {
     onError: (errorMsg: string) => {
         addMessage(Sender.System, `Error Mikrofon: ${errorMsg}`);
         setAiStatus(AiStatus.Error);
+        setPendingRecordingStart(false); // Clear pending start on mic error
     }
   });
   
@@ -181,6 +185,24 @@ const App: React.FC = () => {
     stopRecordingRef.current = stopRecording;
   }, [isRecording, stopRecording]);
 
+  useEffect(() => {
+    if (pendingRecordingStart && aiStatus === AiStatus.Listening) {
+      const initRecording = async () => {
+        try {
+          await startRecording();
+          setPendingRecordingStart(false); 
+        } catch (recError) {
+          console.error("Gagal memulai rekaman setelah koneksi:", recError);
+          addMessage(Sender.System, "Gagal memulai mikrofon. Silakan coba lagi.");
+          setAiStatus(AiStatus.Error);
+          stopRecordingAndSession(); 
+          setPendingRecordingStart(false);
+        }
+      };
+      initRecording();
+    }
+  }, [pendingRecordingStart, aiStatus, startRecording, addMessage, stopRecordingAndSession]);
+
 
   const handleToggleRecording = useCallback(async () => {
     if (!liveAiServiceRef.current || !process.env.API_KEY) { 
@@ -190,31 +212,26 @@ const App: React.FC = () => {
     }
 
     if (isRecording) {
+      setPendingRecordingStart(false); 
       stopRecording(); 
-      // Do not call stopRecordingAndSession() immediately here if we want to allow resumption.
-      // Instead, sendAudioStreamEnd is handled by onRecordingStateChange.
-      // The session should remain "open" on the service side if it's a pause.
-      // If the user *really* wants to stop, the UI might need a different button or logic.
-      // For now, "stop" on the button means stop recording audio input.
-      // stopRecordingAndSession(); // Keep this if "stop" should always fully terminate.
-      // Let's assume the current behavior is that "stop" fully stops the AI interaction.
-       stopRecordingAndSession();
+      stopRecordingAndSession();
     } else {
       setMessages([]); 
       setCurrentTranscript('');
       currentAiMessageIdRef.current = null;
       setAiStatus(AiStatus.Connecting);
+      setPendingRecordingStart(true); 
       try {
-        await liveAiServiceRef.current.connect(); // connect will use stored handle if available
-        await startRecording(); 
+        await liveAiServiceRef.current.connect(); 
       } catch (error) {
-        console.error("Gagal menghubungkan atau memulai rekaman:", error);
+        console.error("Gagal menghubungkan:", error);
         setAiStatus(AiStatus.Error);
-        addMessage(Sender.System, "Gagal memulai percakapan. Silakan coba lagi.");
-        stopRecordingAndSession(); 
+        addMessage(Sender.System, "Gagal memulai percakapan (koneksi). Silakan coba lagi.");
+        setPendingRecordingStart(false);
+        stopRecordingAndSession(); // Ensure cleanup if connect itself throws immediately
       }
     }
-  }, [isRecording, startRecording, stopRecording, stopRecordingAndSession, addMessage]);
+  }, [isRecording, startRecording, stopRecording, stopRecordingAndSession, addMessage]); // Removed liveAiServiceRef from deps as it's stable
 
   const handleToggleMute = () => {
     setIsMuted(prev => !prev);
