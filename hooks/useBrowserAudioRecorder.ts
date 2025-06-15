@@ -6,14 +6,25 @@ interface UseBrowserAudioRecorderProps {
   onAudioData: (base64Audio: string) => void;
   onRecordingStateChange?: (isRecording: boolean) => void;
   onError?: (error: string) => void;
+  isAiSessionReady: boolean; // New prop
 }
 
-const useBrowserAudioRecorder = ({ onAudioData, onRecordingStateChange, onError }: UseBrowserAudioRecorderProps) => {
+const useBrowserAudioRecorder = ({ onAudioData, onRecordingStateChange, onError, isAiSessionReady }: UseBrowserAudioRecorderProps) => {
   const [isRecording, setIsRecording] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const scriptProcessorNodeRef = useRef<ScriptProcessorNode | null>(null);
   const mediaStreamSourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+
+  const isRecordingRef = useRef(isRecording);
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
+
+  const isAiSessionReadyRef = useRef(isAiSessionReady); // Ref for AI session readiness
+  useEffect(() => {
+    isAiSessionReadyRef.current = isAiSessionReady;
+  }, [isAiSessionReady]);
 
   const float32ToInt16 = (buffer: Float32Array): Int16Array => {
     const int16Buffer = new Int16Array(buffer.length);
@@ -32,7 +43,6 @@ const useBrowserAudioRecorder = ({ onAudioData, onRecordingStateChange, onError 
     const outputLength = Math.floor(inputBuffer.length / ratio);
     const outputBuffer = new Float32Array(outputLength);
     for (let i = 0; i < outputLength; i++) {
-      // Simple nearest-neighbor, can be improved with linear interpolation
       const inputIndex = Math.floor(i * ratio);
       if (inputIndex < inputBuffer.length) {
          outputBuffer[i] = inputBuffer[inputIndex];
@@ -42,7 +52,7 @@ const useBrowserAudioRecorder = ({ onAudioData, onRecordingStateChange, onError 
   };
 
   const startRecording = useCallback(async () => {
-    if (isRecording) return;
+    if (isRecordingRef.current) return;
 
     try {
       mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -56,7 +66,8 @@ const useBrowserAudioRecorder = ({ onAudioData, onRecordingStateChange, onError 
       scriptProcessorNodeRef.current = audioContextRef.current.createScriptProcessor(bufferSize, 1, 1);
 
       scriptProcessorNodeRef.current.onaudioprocess = (event: AudioProcessingEvent) => {
-        if (!isRecordingRef.current) return; 
+        // Check both recording state and AI session readiness
+        if (!isRecordingRef.current || !isAiSessionReadyRef.current) return; 
 
         const inputData = event.inputBuffer.getChannelData(0); 
         
@@ -74,29 +85,24 @@ const useBrowserAudioRecorder = ({ onAudioData, onRecordingStateChange, onError 
       scriptProcessorNodeRef.current.connect(audioContextRef.current.destination); 
 
       setIsRecording(true);
-      isRecordingRef.current = true; 
+      // isRecordingRef.current is updated by its own useEffect
       if (onRecordingStateChange) onRecordingStateChange(true);
 
     } catch (err) {
       console.error("Error starting recording:", err);
       if (onError) onError("Failed to start recording. Please check microphone permissions.");
       setIsRecording(false);
-      isRecordingRef.current = false; 
+      // isRecordingRef.current is updated by its own useEffect
       if (onRecordingStateChange) onRecordingStateChange(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onAudioData, onRecordingStateChange, onError]);
-  
-  const isRecordingRef = useRef(isRecording);
-  useEffect(() => {
-    isRecordingRef.current = isRecording;
-  }, [isRecording]);
+  }, [onAudioData, onRecordingStateChange, onError]); // isAiSessionReadyRef is managed by ref, not a direct dep of useCallback
 
 
   const stopRecording = useCallback(() => {
-    if (!isRecording && !mediaStreamRef.current) return;
+    if (!isRecordingRef.current && !mediaStreamRef.current) return; // Use ref for current state
 
-    isRecordingRef.current = false; 
+    // isRecordingRef.current will be set to false by its useEffect when setIsRecording(false) is called
     setIsRecording(false);
     if (onRecordingStateChange) onRecordingStateChange(false);
 
@@ -117,7 +123,7 @@ const useBrowserAudioRecorder = ({ onAudioData, onRecordingStateChange, onError 
       audioContextRef.current.close().catch(console.error);
       audioContextRef.current = null;
     }
-  }, [isRecording, onRecordingStateChange]); // Added isRecording to dependency array as it's used in the initial check
+  }, [onRecordingStateChange]);
 
   return { isRecording, startRecording, stopRecording };
 };
