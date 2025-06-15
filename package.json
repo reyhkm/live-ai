@@ -12,7 +12,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "@google/genai": "^1.5.1",
-    "react-markdown": "9.0.1?external=react",
+    "react-markdown": "9.0.1",
     "remark-gfm": "4.0.0"
   },
   "devDependencies": {
